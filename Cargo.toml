@@ -1,0 +1,15 @@
+[package]
+name = "rough"
+version = "0.1.0"
+edition = "2021"
+authors = ["Artemis <me@arty.li>"]
+readme = "README.md"
+repository = "https://github.com/Artemis21/rough"
+license = "MIT"
+
+[dependencies]
+pulldown-cmark = "0.9"
+yaml-front-matter = "0.1"
+tera = "1"
+clap = { version = "3", features = ["derive"] }
+serde_yaml = "0.8"
