@@ -16,7 +16,7 @@ jobs:
         include:
         - name: linux
           os: ubuntu-latest
-          artifact_name: target/x86_64-unknown-linux-musl/rough
+          artifact_name: target/x86_64-unknown-linux-musl/release/rough
           asset_name: rough-linux
         - name: windows
           os: windows-latest
