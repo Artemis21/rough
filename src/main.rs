@@ -1,26 +1,18 @@
 //! Rough is a very simple and very opinionated static site generator.
-use clap::Parser;
 use pulldown_cmark as md;
-use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 use tera::Context;
-use yaml_front_matter::{Document, YamlFrontMatter};
 
+mod args;
+mod errors;
 mod inline_imgs;
+mod yaml;
+
+use errors::Error;
 
 /// A result for any error type.
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
-
-#[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
-/// Render a Rough site.
-struct Args {
-    /// The path to the folder containing the site source.
-    src: PathBuf,
-    /// The path to a folder to write the compiled site to.
-    out: PathBuf,
-}
+type Result<T> = std::result::Result<T, Error>;
 
 /// Copy a directory recursively.
 fn copy_dir_all(from: PathBuf, to: &Path) -> io::Result<()> {
@@ -44,7 +36,8 @@ fn render_template(
     to: PathBuf,
     context: &serde_yaml::Value,
 ) -> Result<()> {
-    let rendered = tera.render(name, &Context::from_serialize(context)?)?;
+    let context = &Context::from_serialize(context).expect("context serialisation failed");
+    let rendered = tera.render(name, context)?;
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -56,17 +49,17 @@ fn render_template(
 /// `to`, using `tera` for template rendering. `tera` should be pre-populated
 /// with a template called `project.html`.
 fn render_project(tera: &tera::Tera, from: PathBuf, to: PathBuf) -> Result<serde_yaml::Value> {
-    let doc: Document<serde_yaml::Value> = YamlFrontMatter::parse(&fs::read_to_string(from)?)?;
-    let parser = md::Parser::new_ext(&doc.content, md::Options::all());
+    let (metadata, content) = yaml::parse(&fs::read_to_string(from)?)?;
+    let parser = md::Parser::new_ext(&content, md::Options::all());
     let parser = inline_imgs::InlineImages::new(parser);
     let mut content = String::new();
     md::html::push_html(&mut content, parser);
-    let mut context = serde_yaml::Mapping::new();
-    context.insert("meta".into(), doc.metadata.clone());
-    context.insert("content".into(), content.into());
-    let context = context.into();
+    let context = yaml::MapBuilder::default()
+        .set("meta", metadata.clone())
+        .set("content", content)
+        .build();
     render_template(tera, "project.html", to, &context)?;
-    Ok(doc.metadata)
+    Ok(metadata)
 }
 
 /// Render all source project files within `from` to their corresponding
@@ -90,22 +83,29 @@ fn render_projects(tera: &tera::Tera, from: PathBuf, to: &Path) -> Result<Vec<se
 
 /// Render a full Rough site from the directory `from` to the directory `to`.
 fn render_site(from: &Path, to: &Path) -> Result<()> {
-    fs::create_dir_all(from)?;
+    let from = std::fs::canonicalize(from)?;
+    fs::create_dir_all(&from)?;
     copy_dir_all(from.join("static"), &to.join("static"))?;
-    let mut tera = tera::Tera::new(from.join("*.html").to_str().ok_or("could not parse path")?)?;
+    let mut tera = tera::Tera::new(
+        from.join("*.html")
+            .to_str()
+            .expect("could not decode source path"),
+    )?;
     tera.autoescape_on(vec![]);
     let projects = render_projects(&tera, from.join("projects"), &to.join("projects"))?;
-    let mut context = serde_yaml::Mapping::new();
-    context.insert("projects".into(), projects.into());
-    render_template(&tera, "index.html", to.join("index.html"), &context.into())
+    let context = yaml::MapBuilder::default()
+        .set("projects", projects)
+        .build();
+    render_template(&tera, "index.html", to.join("index.html"), &context)
 }
 
 /// Parse CLI args and generate a site.
 fn main() {
-    let args = Args::parse();
-    if args.src.is_dir() {
-        render_site(&args.src, &args.out).unwrap();
-    } else {
-        println!("'{}' is not a directory", args.out.display());
+    if let Some((from, to)) = args::parse() {
+        if from.is_dir() {
+            render_site(&from, &to).unwrap();
+        } else {
+            println!("'{}' is not a directory", from.display());
+        }
     }
 }
